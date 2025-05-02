@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { supabase } from "@/integrations/supabase/client";
 
 export function JoinRoomForm() {
   const { toast } = useToast();
@@ -28,24 +29,27 @@ export function JoinRoomForm() {
     setIsJoining(true);
     
     try {
-      // In a real app with Supabase, we would verify if the room exists
-      toast({
-        title: "Supabase Connection Required",
-        description: "Please connect Supabase to join existing rooms.",
-      });
+      // Verify if the room exists
+      const { data: room, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+      
+      if (error) {
+        throw new Error("Room not found or you don't have permission to join.");
+      }
       
       // Navigate to the room
-      setTimeout(() => {
-        navigate(`/room/${roomId}`);
-        setRoomId("");
-        setIsJoining(false);
-      }, 1000);
-    } catch (error) {
+      navigate(`/room/${roomId}`, { state: { roomName: room.name } });
+      setRoomId("");
+    } catch (error: any) {
       toast({
         title: "Error joining room",
-        description: "Room not found or you don't have permission to join.",
+        description: error.message || "Room not found or you don't have permission to join.",
         variant: "destructive",
       });
+    } finally {
       setIsJoining(false);
     }
   };

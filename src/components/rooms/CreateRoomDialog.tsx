@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 export function CreateRoomDialog() {
   const { toast } = useToast();
@@ -36,29 +37,32 @@ export function CreateRoomDialog() {
     setIsCreating(true);
     
     try {
-      // Generate a mock UUID for this demo
-      // In a real app with Supabase, this would be created by Supabase
-      const mockRoomId = crypto.randomUUID();
+      // Create the room in Supabase
+      const { data: room, error } = await supabase
+        .from('rooms')
+        .insert([{ name: roomName }])
+        .select()
+        .single();
+      
+      if (error) throw error;
       
       toast({
-        title: "Supabase Connection Required",
-        description: "Please connect Supabase to create persistent rooms.",
+        title: "Room created",
+        description: `${roomName} has been created successfully.`,
       });
       
       // Navigate to the new room
-      setTimeout(() => {
-        navigate(`/room/${mockRoomId}`, { state: { roomName } });
-        setOpen(false);
-        setRoomName("");
-        setIsCreating(false);
-      }, 1000);
-    } catch (error) {
+      navigate(`/room/${room.id}`, { state: { roomName } });
+      setOpen(false);
+      setRoomName("");
+    } catch (error: any) {
       console.error("Error creating room:", error);
       toast({
         title: "Error creating room",
-        description: "There was an error creating your room. Please try again.",
+        description: error.message || "There was an error creating your room. Please try again.",
         variant: "destructive",
       });
+    } finally {
       setIsCreating(false);
     }
   };

@@ -12,6 +12,7 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     const checkAuth = async () => {
@@ -26,9 +27,28 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
           });
           navigate("/login");
           setIsAuthenticated(false);
-        } else {
-          setIsAuthenticated(true);
+          return;
         }
+
+        // Check if the user has a profile, create one if they don't
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+        
+        if (profileError && profileError.code === 'PGRST116') {
+          // Profile doesn't exist, create one
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert([{ id: data.user.id }]);
+            
+          if (insertError) {
+            console.error("Error creating profile:", insertError);
+          }
+        }
+        
+        setIsAuthenticated(true);
       } catch (error) {
         console.error("Auth check error:", error);
         toast({
@@ -38,6 +58,8 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
         });
         navigate("/login");
         setIsAuthenticated(false);
+      } finally {
+        setLoading(false);
       }
     };
     
@@ -50,6 +72,28 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
         setIsAuthenticated(false);
       } else if (event === 'SIGNED_IN' && session) {
         setIsAuthenticated(true);
+        
+        // We need to use setTimeout to avoid calling Supabase functions
+        // directly inside the onAuthStateChange callback
+        setTimeout(async () => {
+          try {
+            // Check if profile exists when user signs in
+            const { data: profile, error: profileError } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+            
+            if (profileError && profileError.code === 'PGRST116') {
+              // Create profile if it doesn't exist
+              await supabase
+                .from('profiles')
+                .insert([{ id: session.user.id }]);
+            }
+          } catch (error) {
+            console.error("Error checking/creating profile:", error);
+          }
+        }, 0);
       }
     });
     
@@ -58,9 +102,12 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
     };
   }, [navigate, toast]);
   
-  if (isAuthenticated === null) {
-    // Still loading, you could show a spinner here
-    return <div className="flex justify-center items-center h-screen">Loading...</div>;
+  if (isAuthenticated === null || loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
   }
   
   if (!isAuthenticated) {

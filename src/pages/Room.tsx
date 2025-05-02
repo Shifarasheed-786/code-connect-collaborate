@@ -4,9 +4,16 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CodeEditor } from "@/components/code-editor/CodeEditor";
 import { ChatInterface } from "@/components/chat/ChatInterface";
-import { Separator } from "@/components/ui/separator";
 import { Code, Copy, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+
+type RoomData = {
+  id: string;
+  name: string;
+  created_at: string;
+  user_id: string;
+};
 
 const Room = () => {
   const { roomId } = useParams<{ roomId: string }>();
@@ -17,6 +24,8 @@ const Room = () => {
   const [roomName, setRoomName] = useState<string>(
     location.state?.roomName || `Room ${roomId?.substring(0, 8)}`
   );
+  const [roomData, setRoomData] = useState<RoomData | null>(null);
+  const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     if (!roomId) {
@@ -26,11 +35,43 @@ const Room = () => {
         description: "The room you are trying to access does not exist.",
         variant: "destructive",
       });
+      return;
     }
     
-    // In a real app, we'd check with Supabase if the room exists
-    // and fetch its details
-  }, [roomId, navigate, toast]);
+    const fetchRoomData = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rooms')
+          .select('*')
+          .eq('id', roomId)
+          .single();
+        
+        if (error) {
+          if (error.code === 'PGRST116') {
+            throw new Error("Room not found or you don't have permission to access it");
+          }
+          throw error;
+        }
+        
+        setRoomData(data);
+        if (data.name) {
+          setRoomName(data.name);
+        }
+      } catch (error: any) {
+        console.error("Error fetching room:", error);
+        toast({
+          title: "Error loading room",
+          description: error.message || "There was a problem loading this room.",
+          variant: "destructive",
+        });
+        navigate("/dashboard");
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchRoomData();
+  }, [roomId, navigate, toast, location.state]);
 
   const copyRoomId = () => {
     if (roomId) {
@@ -42,8 +83,12 @@ const Room = () => {
     }
   };
 
-  if (!roomId) {
-    return null;
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   return (
@@ -67,7 +112,7 @@ const Room = () => {
           
           <div className="flex items-center gap-2">
             <div className="text-xs text-muted-foreground">
-              Room ID: <span className="font-mono">{roomId.substring(0, 8)}...</span>
+              Room ID: <span className="font-mono">{roomId && roomId.length > 8 ? `${roomId.substring(0, 8)}...` : roomId}</span>
             </div>
             <Button variant="ghost" size="icon" onClick={copyRoomId} className="h-8 w-8">
               <Copy className="h-4 w-4" />
@@ -79,11 +124,11 @@ const Room = () => {
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
           <div className="flex-1 min-w-0 overflow-auto">
-            <CodeEditor roomId={roomId} />
+            <CodeEditor roomId={roomId || ''} />
           </div>
           
           <div className="w-full md:w-80 lg:w-96 h-80 md:h-auto flex-shrink-0">
-            <ChatInterface roomId={roomId} />
+            <ChatInterface roomId={roomId || ''} />
           </div>
         </div>
       </div>
