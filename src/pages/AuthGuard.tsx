@@ -30,6 +30,8 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
           return;
         }
 
+        console.log("Authenticated user:", data.user);
+
         // Check if the user has a profile, create one if they don't
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
@@ -37,11 +39,14 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
           .eq('id', data.user.id)
           .single();
         
+        console.log("Profile data:", profileData, "Error:", profileError);
+        
         if (profileError && profileError.code === 'PGRST116') {
           // Profile doesn't exist, create one
+          console.log("Creating new profile for user:", data.user.id);
           const { error: insertError } = await supabase
             .from('profiles')
-            .insert([{ id: data.user.id }]);
+            .insert({ id: data.user.id });
             
           if (insertError) {
             console.error("Error creating profile:", insertError);
@@ -67,6 +72,7 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
     
     // Set up auth state listener
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth state change:", event, session);
       if (event === 'SIGNED_OUT') {
         navigate("/login");
         setIsAuthenticated(false);
@@ -84,11 +90,18 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
               .eq('id', session.user.id)
               .single();
             
+            console.log("Profile check on sign in:", profile, profileError);
+            
             if (profileError && profileError.code === 'PGRST116') {
               // Create profile if it doesn't exist
-              await supabase
+              console.log("Creating profile on sign in for user:", session.user.id);
+              const { error: insertError } = await supabase
                 .from('profiles')
-                .insert([{ id: session.user.id }]);
+                .insert({ id: session.user.id });
+              
+              if (insertError) {
+                console.error("Error creating profile on sign in:", insertError);
+              }
             }
           } catch (error) {
             console.error("Error checking/creating profile:", error);

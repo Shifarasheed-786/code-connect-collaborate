@@ -29,6 +29,13 @@ export function JoinRoomForm() {
     setIsJoining(true);
     
     try {
+      // First check if the user is logged in
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error("You must be logged in to join a room");
+      }
+      
       // Verify if the room exists
       const { data: room, error } = await supabase
         .from('rooms')

@@ -40,6 +40,13 @@ const Room = () => {
     
     const fetchRoomData = async () => {
       try {
+        // First check if the user is logged in
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          throw new Error("You must be logged in to access this room");
+        }
+        
         const { data, error } = await supabase
           .from('rooms')
           .select('*')
@@ -53,6 +60,7 @@ const Room = () => {
           throw error;
         }
         
+        console.log("Room data:", data);
         setRoomData(data);
         if (data.name) {
           setRoomName(data.name);
@@ -141,6 +149,6 @@ const Room = () => {
       </footer>
     </div>
   );
-};
+}
 
 export default Room;

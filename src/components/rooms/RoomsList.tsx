@@ -21,15 +21,27 @@ export function RoomsList() {
   useEffect(() => {
     const fetchRooms = async () => {
       try {
+        // Get the current user
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          setRooms([]);
+          setLoading(false);
+          return;
+        }
+        
+        // Fetch rooms created by the current user
         const { data, error } = await supabase
           .from('rooms')
           .select('*')
+          .eq('user_id', user.id)
           .order('created_at', { ascending: false });
         
         if (error) {
           throw error;
         }
         
+        console.log("Fetched rooms:", data);
         setRooms(data || []);
       } catch (error: any) {
         console.error("Error fetching rooms:", error);

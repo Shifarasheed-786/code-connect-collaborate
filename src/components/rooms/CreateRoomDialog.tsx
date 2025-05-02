@@ -37,10 +37,20 @@ export function CreateRoomDialog() {
     setIsCreating(true);
     
     try {
+      // Get the current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error("You must be logged in to create a room");
+      }
+      
       // Create the room in Supabase
       const { data: room, error } = await supabase
         .from('rooms')
-        .insert([{ name: roomName }])
+        .insert({
+          name: roomName,
+          user_id: user.id
+        })
         .select()
         .single();
       
