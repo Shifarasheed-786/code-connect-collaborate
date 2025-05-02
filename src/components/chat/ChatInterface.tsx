@@ -5,32 +5,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Send } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 type Message = {
   id: string;
   sender: string;
   content: string;
   timestamp: Date;
+  user_id?: string;
 };
 
 type ChatInterfaceProps = {
   roomId: string;
 };
 
-// Mock data for demonstration
-const mockMessages: Message[] = [
-  {
-    id: "1",
-    sender: "System",
-    content: "Welcome to the room! You can collaborate on code and chat here.",
-    timestamp: new Date(),
-  },
-];
-
 export function ChatInterface({ roomId }: ChatInterfaceProps) {
   const { toast } = useToast();
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const scrollToBottom = () => {
@@ -41,28 +34,139 @@ export function ChatInterface({ roomId }: ChatInterfaceProps) {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = () => {
+  // Fetch existing messages when component mounts
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        // Get the current user
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+
+        // Fetch messages for this room
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*, profiles(username)")
+          .eq("room_id", roomId)
+          .order("created_at", { ascending: true });
+        
+        if (error) {
+          console.error("Error fetching messages:", error);
+          toast({
+            title: "Error loading messages",
+            description: "There was a problem loading the chat history.",
+            variant: "destructive",
+          });
+        } else {
+          // Transform the data to match our Message type
+          const formattedMessages = data.map((message: any) => ({
+            id: message.id,
+            sender: message.profiles?.username || "User",
+            content: message.content,
+            timestamp: new Date(message.created_at),
+            user_id: message.user_id,
+          }));
+          
+          setMessages(formattedMessages);
+        }
+      } catch (error) {
+        console.error("Error in fetchMessages:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMessages();
+
+    // Set up realtime subscription for new messages
+    const channel = supabase
+      .channel('public:messages')
+      .on('postgres_changes', 
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages',
+          filter: `room_id=eq.${roomId}`
+        }, 
+        async (payload) => {
+          // Get user information for the sender
+          const { data } = await supabase
+            .from('profiles')
+            .select('username')
+            .eq('id', payload.new.user_id)
+            .single();
+          
+          const newMessage: Message = {
+            id: payload.new.id,
+            content: payload.new.content,
+            sender: data?.username || 'User',
+            timestamp: new Date(payload.new.created_at),
+            user_id: payload.new.user_id
+          };
+          
+          setMessages((current) => [...current, newMessage]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId, toast]);
+
+  const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
     
-    // In a real app, this would be sent to Supabase
-    const message: Message = {
-      id: crypto.randomUUID(),
-      sender: "You",
-      content: newMessage.trim(),
-      timestamp: new Date(),
-    };
-    
-    setMessages([...messages, message]);
-    setNewMessage("");
-    
-    toast({
-      title: "Supabase Connection Required",
-      description: "Please connect Supabase to enable real-time messaging.",
-    });
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Authentication Required",
+          description: "You must be logged in to send messages.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Insert message to Supabase
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          room_id: roomId,
+          user_id: user.id,
+          content: newMessage.trim()
+        });
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Clear the input field
+      setNewMessage("");
+    } catch (error: any) {
+      console.error("Error sending message:", error);
+      toast({
+        title: "Error sending message",
+        description: error.message || "There was a problem sending your message.",
+        variant: "destructive",
+      });
+    }
   };
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Check if user owns this message
+  const isOwnMessage = async (userId?: string) => {
+    if (!userId) return false;
+    const { data } = await supabase.auth.getUser();
+    return data.user?.id === userId;
   };
 
   return (
@@ -72,25 +176,35 @@ export function ChatInterface({ roomId }: ChatInterfaceProps) {
       </CardHeader>
       <CardContent className="flex-1 p-0 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message) => (
-            <div 
-              key={message.id}
-              className={`flex flex-col max-w-[80%] ${message.sender === "You" ? "ml-auto" : ""}`}
-            >
-              <div className={`rounded-lg p-3 ${
-                message.sender === "You" 
-                  ? "bg-primary text-primary-foreground" 
-                  : "bg-muted"
-              }`}>
-                {message.content}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                <span>{message.sender}</span>
-                <span>•</span>
-                <span>{formatTime(message.timestamp)}</span>
-              </div>
+          {loading ? (
+            <div className="flex justify-center items-center h-full">
+              <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary"></div>
             </div>
-          ))}
+          ) : messages.length === 0 ? (
+            <div className="text-center text-muted-foreground p-4">
+              No messages yet. Start the conversation!
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div 
+                key={message.id}
+                className={`flex flex-col max-w-[80%] ${message.user_id === supabase.auth.getSession().then(({data}) => data.session?.user.id) ? "ml-auto" : ""}`}
+              >
+                <div className={`rounded-lg p-3 ${
+                  message.user_id === supabase.auth.getSession().then(({data}) => data.session?.user.id)
+                    ? "bg-primary text-primary-foreground" 
+                    : "bg-muted"
+                }`}>
+                  {message.content}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <span>{message.sender}</span>
+                  <span>•</span>
+                  <span>{formatTime(message.timestamp)}</span>
+                </div>
+              </div>
+            ))
+          )}
           <div ref={messagesEndRef} />
         </div>
         
